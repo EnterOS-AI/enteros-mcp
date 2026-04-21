@@ -113,6 +113,11 @@ export async function platformGet<T = unknown>(
 
       if (!res.ok) {
         const text = await res.text();
+        // After exhausting 429 retries the loop exits here; all other
+        // non-ok statuses also return early rather than falling through.
+        if (res.status === 429) {
+          return { error: "RATE_LIMITED", detail: text };
+        }
         return { error: `HTTP ${res.status}`, detail: text };
       }
 

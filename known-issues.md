@@ -25,10 +25,113 @@ Format per entry:
 
 ---
 
+## KI-001 — No structured logging; all errors go to console.log
+
+**File:** `src/index.ts` (and likely all tool handlers)
+**Status:** Identified
+**Severity:** Medium
+
+### Symptom
+Tool handlers use `console.log` and `console.error` for output. Structured JSON
+logs (for ingestion into Datadog, Grafana, or the platform's Langfuse traces)
+are not emitted. MCP `INTERNAL_ERROR` responses include human-readable text
+but no correlation ID or structured metadata.
+
+### Impact
+Debugging production issues requires reading raw console output. Correlation IDs
+from the platform request context are not attached to errors, making it hard to
+trace a failing tool call back to a specific workspace or delegation in the
+platform logs.
+
+### Suggested fix
+Replace `console.log/error` with a structured logger (e.g. `pino` or
+`winston` with JSON format). Attach `requestId` / `workspaceId` from the MCP
+request context to every log entry. Ensure errors include a correlation ID
+from the platform trace header (`X-Trace-ID` or similar).
+
+---
+
+## KI-002 — Tool input schemas are not validated before passing to handlers
+
+**File:** `src/tools/*.ts` (tool handlers)
+**Status:** Resolved
+**Severity:** High
+
+### Resolution
+The `@modelcontextprotocol/sdk` server framework already calls
+`validateToolInput(tool, args, toolName)` before dispatching to any handler.
+It uses `zod.safeParseAsync()` against the tool's `inputSchema` (a Zod object
+or raw shape) and returns `INVALID_ARGUMENTS` on parse failure — no handler
+code change needed. Each tool's `srv.tool(..., inputSchema)` already satisfies
+this requirement. No code change required.
+
+---
+
+## KI-003 — `test.txt` artifact left in repo root
+
+**File:** `test.txt` (root)
+**Status:** Resolved
+**Resolved in:** main branch commit `b422105` removed test.txt as part of CLAUDE.md merge.
+
+### Symptom
+A 5-byte file named `test.txt` with content `"test"` existed in the repo root.
+This was a leftover debug artifact with no legitimate purpose.
+
+### Impact
+Clutter. Could have been accidentally included in the npm package if `files` in
+`package.json` was ever set to include all non-ignored files.
+
+---
+
+## KI-004 — No rate limiting or backpressure on platform API calls
+
+**File:** `src/api.ts`, `src/tools/*.ts`
+**Status:** Resolved (PR: `feat/mcp-rate-limiting`)
+**Severity:** Medium
+
+### Resolution
+Added `platformGet()` in `src/api.ts` — a GET helper with automatic retry
+on 429 (Too Many Requests). It respects the `Retry-After` header (seconds,
+rounded up to ms); when absent it uses exponential backoff with ±25% jitter
+(starting at 1 s, doubling each attempt, capped at 30 s). After 3 retries
+it returns `{ error: "RATE_LIMITED", detail: … }` so callers get a
+structured `RATE_LIMITED` MCP error code. All 37 GET calls across the 12
+tool modules now use `platformGet()` instead of `apiCall("GET", …)`. POST,
+PUT, PATCH, DELETE calls continue to use `apiCall` (non-idempotent).
+`platformGet` is also re-exported from `src/index.ts` for SDK consumers.
+
+---
+
+## KI-005 — Streaming tools do not honour cancellation signals
+
+**File:** `src/tools/` (streaming-capable tool handlers)
+**Status:** Identified
+**Severity:** Low
+
+### Symptom
+If a streaming tool is cancelled mid-stream (the MCP host closes the connection
+or sends a cancellation signal), the handler continues emitting chunks until
+the full response is complete. There is no check for cancellation before each
+chunk emission.
+
+### Impact
+Cancelled requests continue consuming platform API resources (and possibly
+incurring cost) even after the client has disconnected. Chunks emitted after
+cancellation are silently dropped by the transport but still consumed
+upstream.
+
+### Suggested fix
+If the MCP server library exposes a cancellation token or abort signal,
+check it before each `ContentBlock` emission and stop cleanly (close the
+stream without error) if cancelled. Document the behaviour in the streaming
+convention in CLAUDE.md.
+
+---
+
 ## KI-006 — `anyOf` schemas cause `INVALID_ARGUMENTS` on valid inputs
 
-**File:** `src/tools/plugins.ts` (and other tools with union-typed schemas)  
-**Status:** Identified  
+**File:** `src/tools/plugins.ts` (and other tools with union-typed schemas)
+**Status:** Identified
 **Severity:** Medium
 
 ### Symptom
@@ -50,8 +153,8 @@ the schema before passing to the validator to normalize `anyOf` into supported f
 
 ## KI-007 — Heartbeat cleanup fires after SSE stream closes
 
-**File:** `src/tools/remote_agents.ts` (heartbeat tool)  
-**Status:** Identified  
+**File:** `src/tools/remote_agents.ts` (heartbeat tool)
+**Status:** Identified
 **Severity:** Low
 
 ### Symptom
@@ -68,64 +171,3 @@ sessions that never expire on the platform side.
 Attach a cleanup function to the SSE stream `close` event. Invalidate the heartbeat
 timer when the stream ends so no further calls are made. Document the expected
 SSE session lifecycle in the streaming convention section of CLAUDE.md.
-
----
-
-## KI-002 — Tool input schemas are not validated before passing to handlers
-
-**File:** `src/tools/*.ts` (tool handlers)  
-**Status:** Resolved  
-**Severity:** High
-
-### Resolution
-The `@modelcontextprotocol/sdk` server framework already calls
-`validateToolInput(tool, args, toolName)` before dispatching to any handler.
-It uses `zod.safeParseAsync()` against the tool's `inputSchema` (a Zod object
-or raw shape) and returns `INVALID_ARGUMENTS` on parse failure — no handler
-code change needed. Each tool's `srv.tool(..., inputSchema)` already satisfies
-this requirement.
-
----
-
-## KI-004 — No rate limiting or backpressure on platform API calls
-
-**File:** `src/api.ts`, `src/tools/*.ts`  
-**Status:** Resolved (PR: `feat/mcp-rate-limiting`)  
-**Severity:** Medium
-
-### Resolution
-Added `platformGet()` in `src/api.ts` — a GET helper with automatic retry
-on 429 (Too Many Requests). It respects the `Retry-After` header (seconds,
-rounded up to ms); when absent it uses exponential backoff with ±25% jitter
-(starting at 1 s, doubling each attempt, capped at 30 s). After 3 retries
-it returns `{ error: "RATE_LIMITED", detail: … }` so callers get a
-structured `RATE_LIMITED` MCP error code. All 37 GET calls across the 12
-tool modules now use `platformGet()` instead of `apiCall("GET", …)`. POST,
-PUT, PATCH, DELETE calls continue to use `apiCall` (non-idempotent).
-`platformGet` is also re-exported from `src/index.ts` for SDK consumers.
-
----
-
-## KI-005 — Streaming tools do not honour cancellation signals
-
-**File:** `src/tools/` (streaming-capable tool handlers)  
-**Status:** Identified  
-**Severity:** Low
-
-### Symptom
-If a streaming tool is cancelled mid-stream (the MCP host closes the connection
-or sends a cancellation signal), the handler continues emitting chunks until
-the full response is complete. There is no check for cancellation before each
-chunk emission.
-
-### Impact
-Cancelled requests continue consuming platform API resources (and possibly
-incurring cost) even after the client has disconnected. Chunks emitted after
-cancellation are silently dropped by the transport but still consumed
-upstream.
-
-### Suggested fix
-If the MCP server library exposes a cancellation token or abort signal,
-check it before each `ContentBlock` emission and stop cleanly (close the
-stream without error) if cancelled. Document the behaviour in the streaming
-convention in CLAUDE.md.
