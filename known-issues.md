@@ -130,24 +130,23 @@ convention in CLAUDE.md.
 
 ## KI-006 — `anyOf` schemas cause `INVALID_ARGUMENTS` on valid inputs
 
-**File:** `src/tools/plugins.ts` (and other tools with union-typed schemas)
-**Status:** Identified
+**File:** `src/tools/plugins.ts`, `src/tools/workspaces.ts`
+**Status:** Resolved (PR: `fix/kind-ki006-anyof` #5)
 **Severity:** Medium
 
-### Symptom
-Tool `inputSchema` definitions that use JSON Schema `anyOf` to express union types
-(e.g., `anyOf: [{ type: "string" }, { type: "null" }]`) are not handled correctly by
-the MCP JSON Schema validator. Even when the actual input matches a valid branch of
-the `anyOf`, validation fails and returns `INVALID_ARGUMENTS`.
+### Resolution
+The root cause was `z.string().optional().nullable()` (zod chain order) in the
+`update_workspace` tool's `parent_id` schema. `zod-to-json-schema` with
+`strictUnions: true` produces `anyOf` for the `optional().nullable()` chain, but
+`nullable().optional()` produces a clean `type: ["string","null"]` with no `anyOf`.
 
-### Impact
-Tools using optional or nullable fields defined with `anyOf` reject all calls,
-breaking plugin installation and other workflows that depend on those tools.
+Fix: changed `z.string().nullable().optional()` → `z.string().optional().nullable()`
+in `src/tools/workspaces.ts:122`. Semantically equivalent (string | null | undefined),
+no runtime behaviour change.
 
-### Suggested fix
-Replace `anyOf` with nullable types directly (`{ type: "string", nullable: true }`)
-or flatten the schema to use oneOf with concrete variants. Alternatively, pre-process
-the schema before passing to the validator to normalize `anyOf` into supported forms.
+Regression guard added in `tests/__tests__/plugins-schema.test.ts`: mirrors all 6
+plugin tool schemas and asserts no `anyOf` in JSON Schema output. Includes a control
+test documenting the known `optional().nullable()` zod-to-json-schema quirk.
 
 ---
 
