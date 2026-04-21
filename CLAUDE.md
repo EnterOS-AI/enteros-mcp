@@ -143,23 +143,141 @@ src/
   utils/            # Helpers, validators
 ```
 
+## MCP Tool Registry
+
+Full list of tools exposed by this server. Each is implemented in `src/tools/<name>.ts`.
+
+### Workspace Tools
+| Tool | Description |
+|------|-------------|
+| `list_workspaces` | List all workspaces accessible to the authenticated user |
+| `create_workspace` | Create a new workspace with name, role, tier, and template |
+| `get_workspace` | Get workspace details by ID |
+| `update_workspace` | Patch workspace fields (name, tier, parent_id, etc.) |
+| `delete_workspace` | Delete a workspace (cascades to children) |
+| `restart_workspace` | Restart all agents in a workspace (picks up new secrets/prompts) |
+
+### Agent Tools
+| Tool | Description |
+|------|-------------|
+| `list_agents` | List agents in a workspace |
+| `get_agent` | Get agent details by ID |
+| `send_message` | Send an A2A message to an agent (returns structured response) |
+| `list_peers` | List peer agents discoverable by a given agent |
+
+### Delegation Tools
+| Tool | Description |
+|------|-------------|
+| `delegate_task` | Delegate a task to a child workspace (sync, waits for response) |
+| `delegate_task_async` | Delegate a task to a child workspace (fire-and-forget, returns task_id) |
+
+### Secrets Tools
+| Tool | Description |
+|------|-------------|
+| `get_secret` | Retrieve a secret value for a workspace |
+| `set_secret` | Set a key/value secret for a workspace |
+| `delete_secret` | Delete a secret |
+
+### Files Tools
+| Tool | Description |
+|------|-------------|
+| `list_files` | List files in a workspace container |
+| `get_file` | Read a file's content |
+| `put_file` | Write or update a file in the container |
+| `delete_file` | Delete a file |
+
+### Memory Tools
+| Tool | Description |
+|------|-------------|
+| `commit_memory` | Commit a structured memory entry (with optional namespace) |
+| `recall_memory` | Search previously committed memories |
+
+### Plugins Tools
+| Tool | Description |
+|------|-------------|
+| `install_plugin` | Download and install a plugin into a workspace from the registry |
+
+### Channels Tools
+| Tool | Description |
+|------|-------------|
+| `list_channels` | List communication channels |
+| `get_channel` | Get channel details |
+| `post_message` | Post a message to a channel |
+
+### Schedules Tools
+| Tool | Description |
+|------|-------------|
+| `list_schedules` | List scheduled tasks |
+| `create_schedule` | Create a new scheduled task |
+| `delete_schedule` | Delete a scheduled task |
+
+### Discovery Tools
+| Tool | Description |
+|------|-------------|
+| `check_access` | Verify A2A access between two workspace IDs |
+
+### Remote Agents Tools
+| Tool | Description |
+|------|-------------|
+| `get_remote_agent_info` | Get runtime info for a remote agent |
+| `heartbeat` | Send a heartbeat to the platform |
+
+### Approvals Tools
+| Tool | Description |
+|------|-------------|
+| `list_approvals` | List pending approvals for a workspace |
+| `approve` | Approve a pending item |
+| `reject` | Reject a pending item |
+
+## MCP Transport Gotchas
+
+### STDIO Transport (Claude Desktop, CLI hosts)
+- **Windows CORS issue:** STDIO transport does not use HTTP, so CORS is not a factor — but some Claude Desktop configurations on Windows proxy through an HTTP layer that adds CORS headers. If tools fail silently on Windows, check for a proxy intercepting the STDIO stream.
+- **STDIO timeout:** STDIO mode has no built-in keepalive. If the MCP host is idle for >5 min, the platform may close the workspace. Send a `heartbeat` tool call every ~3 min from long-running sessions.
+- **Windows binary path:** On Windows, the MCP server executable path in Claude Desktop config must use backslashes or forward slashes with escaped backslashes (`\\`) in JSON. Use forward slashes for portability.
+
+### SSE Transport (web hosts)
+- **SSE vs STDIO:** SSE (Server-Sent Events) is used when the MCP host connects over HTTP. It supports streaming responses natively. STDIO is for local CLI tools.
+- **Heartbeat cleanup:** When using SSE, each tool call opens a new HTTP connection. Ensure the host sends a `close` event when the stream finishes to allow connection reuse. Unterminated SSE streams can hold connections open indefinitely.
+
+### `--self-update` Flag
+The server supports a `--self-update` flag for auto-updating:
+```bash
+mcp-server --self-update
+```
+**Proxy TLS note:** If the server is behind a corporate proxy, `--self-update` may fail with a TLS handshake error (`UNABLE_TO_VERIFY_LEAF_SIGNATURE`). The proxy intercepts the TLS cert, and the Go/MJS HTTP client rejects it. Fix: set `NODE_EXTRA_CA_CERTS=/path/to/proxy-ca.pem` in the environment, or disable `rejectUnauthorized` for the update endpoint only (do not disable globally).
+
+## Claude Desktop Configuration
+
+Add this server to Claude Desktop via `claude_desktop_config.json`:
+
+**macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+**Linux:** `~/.config/Claude/claude_desktop_config.json`
+**Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "molecule-ai": {
+      "command": "node",
+      "args": ["/absolute/path/to/dist/index.js"],
+      "env": {
+        "MOLECULE_API_URL": "https://api.moleculesai.app",
+        "MOLECULE_API_KEY": "your-api-key-here",
+        "MCP_SERVER_PORT": "3000"
+      }
+    }
+  }
+}
+```
+
+To find the absolute path to the built binary:
+```bash
+node dist/index.js --help  # verify path
+```
+
+After editing the config, restart Claude Desktop (fully quit, then reopen) to load the new server.
+
 ## Known Issues
 
 See `known-issues.md` at the repo root for the full tracked list.
-
-**File a GitHub issue first — do not silently patch known problems.**
-
-Before opening an issue, check:
-- The [open issues](https://github.com/Molecule-AI/molecule-mcp-server/issues)
-- The platform constraints in `docs/development/constraints-and-rules.md`
-- Any relevant cron learnings in `.claude/cron-learnings.md`
-
-## Artifact: test.txt
-
-There is a leftover artifact file `test.txt` in the repo root (5 bytes, content: `"test"`). Delete it before any commit:
-
-```bash
-rm test.txt
-git add test.txt
-git commit -m "chore: remove test artifact"
-```
