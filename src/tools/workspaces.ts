@@ -119,7 +119,7 @@ export function registerWorkspaceTools(srv: McpServer) {
       name: z.string().optional(),
       role: z.string().optional(),
       tier: z.number().optional(),
-      parent_id: z.string().nullable().optional().describe("Set parent for nesting, null to un-nest"),
+      parent_id: z.string().optional().nullable().describe("Set parent for nesting, null to un-nest"),
     },
     handleUpdateWorkspace
   );

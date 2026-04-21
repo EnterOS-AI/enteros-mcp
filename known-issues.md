@@ -54,16 +54,32 @@ from the platform trace header (`X-Trace-ID` or similar).
 ## KI-002 — Tool input schemas are not validated before passing to handlers
 
 **File:** `src/tools/*.ts` (tool handlers)
-**Status:** Resolved
+**Status:** Resolved — validation is handled by the MCP SDK framework
 **Severity:** High
 
 ### Resolution
-The `@modelcontextprotocol/sdk` server framework already calls
+The `@modelcontextprotocol/sdk` server framework (`src/server/mcp.js`) calls
 `validateToolInput(tool, args, toolName)` before dispatching to any handler.
-It uses `zod.safeParseAsync()` against the tool's `inputSchema` (a Zod object
-or raw shape) and returns `INVALID_ARGUMENTS` on parse failure — no handler
-code change needed. Each tool's `srv.tool(..., inputSchema)` already satisfies
-this requirement. No code change required.
+It uses `safeParseAsync()` against the tool's `inputSchema` (a Zod object
+or raw shape) and throws `McpError(ErrorCode.InvalidParams, ...)` on parse
+failure — which the SDK maps to an `INVALID_ARGUMENTS` MCP response.
+
+Concretely:
+
+1. `srv.tool(name, desc, inputSchema, handler)` registers the schema.
+2. On every call, the SDK calls `validateToolInput(tool, request.params.arguments)`.
+3. `safeParseAsync(schemaToParse, args)` runs — `args` must match the Zod schema.
+4. On failure, an `INVALID_ARGUMENTS` MCP error is returned. **Handlers never
+   receive invalid input** — the SDK short-circuits before the handler is called.
+
+Each handler in `src/tools/*.ts` therefore does **not** need its own Zod
+validation layer. Adding one would be redundant. The existing `srv.tool(..., inputSchema)`
+registration is sufficient and already satisfies the KI requirement.
+
+### What would break this
+If a tool's `inputSchema` is missing required fields, or if `safeParseAsync`
+fails for a valid input (e.g. due to `anyOf` in the generated JSON Schema —
+see KI-006), the validation would incorrectly reject valid calls.
 
 ---
 
@@ -130,24 +146,23 @@ convention in CLAUDE.md.
 
 ## KI-006 — `anyOf` schemas cause `INVALID_ARGUMENTS` on valid inputs
 
-**File:** `src/tools/plugins.ts` (and other tools with union-typed schemas)
-**Status:** Identified
+**File:** `src/tools/plugins.ts`, `src/tools/workspaces.ts`
+**Status:** Resolved (PR: `fix/kind-ki006-anyof` #5)
 **Severity:** Medium
 
-### Symptom
-Tool `inputSchema` definitions that use JSON Schema `anyOf` to express union types
-(e.g., `anyOf: [{ type: "string" }, { type: "null" }]`) are not handled correctly by
-the MCP JSON Schema validator. Even when the actual input matches a valid branch of
-the `anyOf`, validation fails and returns `INVALID_ARGUMENTS`.
+### Resolution
+The root cause was `z.string().optional().nullable()` (zod chain order) in the
+`update_workspace` tool's `parent_id` schema. `zod-to-json-schema` with
+`strictUnions: true` produces `anyOf` for the `optional().nullable()` chain, but
+`nullable().optional()` produces a clean `type: ["string","null"]` with no `anyOf`.
 
-### Impact
-Tools using optional or nullable fields defined with `anyOf` reject all calls,
-breaking plugin installation and other workflows that depend on those tools.
+Fix: changed `z.string().nullable().optional()` → `z.string().optional().nullable()`
+in `src/tools/workspaces.ts:122`. Semantically equivalent (string | null | undefined),
+no runtime behaviour change.
 
-### Suggested fix
-Replace `anyOf` with nullable types directly (`{ type: "string", nullable: true }`)
-or flatten the schema to use oneOf with concrete variants. Alternatively, pre-process
-the schema before passing to the validator to normalize `anyOf` into supported forms.
+Regression guard added in `tests/__tests__/plugins-schema.test.ts`: mirrors all 6
+plugin tool schemas and asserts no `anyOf` in JSON Schema output. Includes a control
+test documenting the known `optional().nullable()` zod-to-json-schema quirk.
 
 ---
 
