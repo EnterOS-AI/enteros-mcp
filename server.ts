@@ -457,11 +457,18 @@ function extractText(act: ActivityEntry): string {
   // Walk the envelope in priority order. Fall back to act.summary so the peer
   // message at least surfaces SOMETHING — silent-drop is the failure mode this
   // helper exists to prevent.
+  // Part discriminator: a2a-sdk v0 used `type`, v1 (current) uses
+  // `kind`. Real platform peers send `kind === 'text'`, so dropping
+  // v1-shaped parts silently masks every inbound message. Accept both
+  // — see workspace/inbox.py:_extract_text for the same v0/v1 fix on
+  // the universal-MCP path. Reproduced live on hongmingwang tenant
+  // 2026-04-30: messages from canvas peers were arriving but extractText
+  // returned only act.summary because every part had `kind` not `type`.
   const body = act.request_body as {
-    parts?: Array<{ type?: string; text?: string }>
+    parts?: Array<{ type?: string; kind?: string; text?: string }>
     params?: {
-      message?: { parts?: Array<{ type?: string; text?: string }> }
-      parts?: Array<{ type?: string; text?: string }>
+      message?: { parts?: Array<{ type?: string; kind?: string; text?: string }> }
+      parts?: Array<{ type?: string; kind?: string; text?: string }>
     }
   } | undefined
 
@@ -472,7 +479,10 @@ function extractText(act: ActivityEntry): string {
   ]
   for (const parts of candidates) {
     if (Array.isArray(parts)) {
-      const text = parts.filter(p => p.type === 'text').map(p => p.text ?? '').join('')
+      const text = parts
+        .filter(p => p.kind === 'text' || p.type === 'text')
+        .map(p => p.text ?? '')
+        .join('')
       if (text) return text
     }
   }
