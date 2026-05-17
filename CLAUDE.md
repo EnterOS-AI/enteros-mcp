@@ -96,7 +96,10 @@ The workflow:
 
 ### APIs Connected
 
-The server connects to the Molecule AI platform REST API. See the platform SDK (`../molecule-sdk-python`) for the underlying API client used.
+The server connects to the Molecule AI platform REST API via its own TypeScript
+client (`src/api.ts`). It does not use the Python SDK (`molecule-sdk-python`) —
+the Python SDK is for remote agents that run outside the platform; this server
+runs as an MCP bridge *on* the operator side.
 
 ### Environment Variables
 
@@ -110,7 +113,7 @@ For local development, copy `.env.example` → `.env` and fill in values.
 
 ### Postgres
 
-Platform data lives in Postgres (source of truth). The server reads data via the platform SDK — it does not connect to Postgres directly.
+Platform data lives in Postgres (source of truth). The server reads data via the platform REST API — it does not connect to Postgres directly.
 
 ## TypeScript Conventions
 
