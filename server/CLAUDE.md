@@ -148,9 +148,9 @@ src/
 
 ## MCP Tool Registry
 
-Full list of tools exposed by this server (87 total). Each is implemented in `src/tools/<name>.ts`.
+Full list of tools exposed by this server (88 total). Each is implemented in `src/tools/<name>.ts`.
 
-### Workspace Tools (8)
+### Workspace Tools (9)
 | Tool | Description |
 |------|-------------|
 | `list_workspaces` | List all workspaces with their status, skills, and hierarchy |
@@ -160,6 +160,7 @@ Full list of tools exposed by this server (87 total). Each is implemented in `sr
 | `delete_workspace` | Delete a workspace (cascades to children) |
 | `restart_workspace` | Restart an offline or failed workspace |
 | `pause_workspace` | Pause a workspace (stops container, preserves config) |
+| `provision_workspace` | Provision a workspace with a specific runtime (claude-code, codex, hermes, openclaw, langgraph, autogen, crewai, deepagents). Fail-closed: validates the runtime, reads the created workspace back, and returns an error if the platform silently fell back to a different runtime. Use this — not `create_workspace` — when the runtime must be guaranteed. |
 | `resume_workspace` | Resume a paused workspace |
 
 ### Agent Tools (6)
