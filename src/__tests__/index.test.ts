@@ -222,6 +222,82 @@ describe("handleProvisionWorkspace (fail-closed contract)", () => {
     expect(parsed.ok).toBe(true);
     expect(parsed.provisioned).toBe(true);
   });
+
+  // Call-indexed fetch mock. provision_workspace with role_config makes
+  // up to 5 sequential calls (POST create, GET runtime, PUT config.yaml,
+  // PUT model, GET model); a per-call implementation is the robust mock
+  // for a multi-call handler (mockResolvedValueOnce chains are brittle
+  // across reset ordering once the call count exceeds ~2).
+  function mockFetchCalls(seq: unknown[]) {
+    let i = 0;
+    return jest.fn().mockImplementation(() => {
+      const payload = seq[Math.min(i, seq.length - 1)];
+      i += 1;
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        text: () => Promise.resolve(JSON.stringify(payload)),
+      });
+    });
+  }
+
+  test("role_config: applies config.yaml + model and read-back-asserts the effective model", async () => {
+    // POST create → GET runtime → PUT config.yaml → PUT model → GET model
+    global.fetch = mockFetchCalls([
+      { id: "ws-pm", status: "provisioning" },
+      { id: "ws-pm", runtime: "claude-code" },
+      { status: "saved", path: "config.yaml" },
+      { status: "saved", model: "opus" },
+      { model: "opus", source: "workspace_secrets" },
+    ]) as unknown as typeof fetch;
+    const result = await handleProvisionWorkspace({
+      name: "prod-PM",
+      runtime: "claude-code",
+      role_config: { model: "opus", config_yaml: "name: prod-PM\nruntime: claude-code\n" },
+    });
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.role_config_applied).toBe(true);
+    expect(parsed.applied.model).toBe("opus");
+    expect(parsed.applied.config_yaml).toBe("written");
+  });
+
+  test("role_config: fails closed when the effective model does not match the requested model", async () => {
+    // model write acks, but read-back still shows the template default.
+    global.fetch = mockFetchCalls([
+      { id: "ws-bad", status: "provisioning" },
+      { id: "ws-bad", runtime: "claude-code" },
+      { status: "saved", path: "config.yaml" },
+      { status: "saved", model: "opus" },
+      { model: "sonnet", source: "workspace_secrets" },
+    ]) as unknown as typeof fetch;
+    const result = await handleProvisionWorkspace({
+      name: "prod-PM",
+      runtime: "claude-code",
+      role_config: { model: "opus", config_yaml: "name: prod-PM\n" },
+    });
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.error).toBe("ROLE_CONFIG_MODEL_MISMATCH");
+    expect(parsed.role_config_applied).toBe(false);
+    expect(parsed.requested_model).toBe("opus");
+    expect(parsed.effective_model).toBe("sonnet");
+    // The workspace still exists (runtime was honored) — surface that.
+    expect(parsed.provisioned).toBe(true);
+  });
+
+  test("role_config absent → role_config_applied:false, runtime still verified", async () => {
+    global.fetch = mockFetchCalls([
+      { id: "ws-n", status: "provisioning" },
+      { id: "ws-n", runtime: "codex" },
+    ]) as unknown as typeof fetch;
+    const result = await handleProvisionWorkspace({
+      name: "plain",
+      runtime: "codex",
+    });
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.role_config_applied).toBe(false);
+  });
 });
 
 // ============================================================

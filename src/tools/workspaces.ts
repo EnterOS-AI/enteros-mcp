@@ -107,6 +107,10 @@ export async function handleProvisionWorkspace(params: {
   parent_id?: string;
   workspace_dir?: string;
   workspace_access?: "none" | "read_only" | "read_write";
+  role_config?: {
+    model?: string;
+    config_yaml?: string;
+  };
 }) {
   const { name, runtime, tier, role, parent_id, workspace_dir, workspace_access } = params;
 
@@ -203,9 +207,115 @@ export async function handleProvisionWorkspace(params: {
     });
   }
 
+  // (4) Optional role-config application + read-back-assert. Runtime is
+  // verified above; now fold in the per-role config so "create" and
+  // "apply-role-config" are ONE fail-closed operation instead of two
+  // (the #218 prod-team defect: workspaces provisioned with the right
+  // runtime but template-default role config — generic name, Sonnet
+  // instead of the role's model, empty charter — because per-role
+  // config was never applied as part of provisioning).
+  //
+  // Mechanism (canonical, source-verified against molecule-core
+  // workspace-server):
+  //   - model  → PUT /workspaces/:id/model  (writes the MODEL_PROVIDER
+  //     workspace_secret; AUTHORITATIVE over config.yaml's
+  //     runtime_config.model per the claude-code adapter resolution
+  //     order; auto-restarts). Read back via GET /workspaces/:id/model
+  //     and ASSERT effective == requested — never trust the write-ack.
+  //   - config.yaml (name/description/charter/required_env) → PUT
+  //     /workspaces/:id/files/config.yaml (writes via EIC to the
+  //     workspace EC2 + auto-restarts). NOTE: the GET-back of
+  //     config.yaml resolves a DIFFERENT host/path than the PUT
+  //     (documented asymmetry — molecule-core
+  //     tests/e2e/test_staging_full_saas.sh), so config.yaml content is
+  //     NOT read-back-asserted here; the model read-back is the
+  //     authoritative effective-config gate.
+  if (params.role_config) {
+    const rc = params.role_config;
+    const applied: Record<string, unknown> = {};
+
+    if (typeof rc.config_yaml === "string" && rc.config_yaml.length > 0) {
+      const w = await apiCall(
+        "PUT",
+        `/workspaces/${workspaceId}/files/config.yaml`,
+        { content: rc.config_yaml }
+      );
+      if (isApiError(w)) {
+        return toMcpResult({
+          error: "ROLE_CONFIG_FAILED",
+          detail: w,
+          phase: "config.yaml",
+          workspace_id: workspaceId,
+          requested_runtime: runtime,
+          resolved_runtime: resolvedRuntime,
+          provisioned: true,
+          role_config_applied: false,
+        });
+      }
+      applied.config_yaml = "written";
+    }
+
+    if (typeof rc.model === "string" && rc.model.length > 0) {
+      const m = await apiCall("PUT", `/workspaces/${workspaceId}/model`, {
+        model: rc.model,
+      });
+      if (isApiError(m)) {
+        return toMcpResult({
+          error: "ROLE_CONFIG_FAILED",
+          detail: m,
+          phase: "model",
+          workspace_id: workspaceId,
+          requested_runtime: runtime,
+          resolved_runtime: resolvedRuntime,
+          provisioned: true,
+          role_config_applied: false,
+        });
+      }
+
+      // Read-back-assert the EFFECTIVE model — not the write-ack.
+      const mb = await platformGet(`/workspaces/${workspaceId}/model`);
+      let effectiveModel: string | undefined;
+      if (!isApiError(mb) && mb && typeof mb === "object") {
+        const v = (mb as Record<string, unknown>).model;
+        if (typeof v === "string") effectiveModel = v;
+      }
+      if (effectiveModel !== rc.model) {
+        return toMcpResult({
+          error: "ROLE_CONFIG_MODEL_MISMATCH",
+          detail:
+            `requested model "${rc.model}" but read-back returned ` +
+            `"${effectiveModel ?? "<unreadable>"}" — the role's model was ` +
+            `NOT applied; treat as NOT configured (do not assume the ` +
+            `requested model is in effect).`,
+          workspace_id: workspaceId,
+          requested_model: rc.model,
+          effective_model: effectiveModel ?? null,
+          requested_runtime: runtime,
+          resolved_runtime: resolvedRuntime,
+          provisioned: true,
+          role_config_applied: false,
+        });
+      }
+      applied.model = effectiveModel;
+    }
+
+    return toMcpResult({
+      ok: true,
+      provisioned: true,
+      role_config_applied: true,
+      workspace_id: workspaceId,
+      requested_runtime: runtime,
+      resolved_runtime: resolvedRuntime,
+      template: template || null,
+      applied,
+      status: createdObj.status ?? "provisioning",
+    });
+  }
+
   return toMcpResult({
     ok: true,
     provisioned: true,
+    role_config_applied: false,
     workspace_id: workspaceId,
     requested_runtime: runtime,
     resolved_runtime: resolvedRuntime,
@@ -292,6 +402,25 @@ export function registerWorkspaceTools(srv: McpServer) {
         .enum(["none", "read_only", "read_write"])
         .optional()
         .describe("Filesystem access mode for /workspace"),
+      role_config: z
+        .object({
+          model: z
+            .string()
+            .optional()
+            .describe(
+              "Effective model slug for this role (e.g. 'opus', 'kimi-for-coding', 'MiniMax-M2.7', 'gpt-5.5'). Applied via PUT /model (authoritative over config.yaml) and read-back-asserted — provisioning fails closed if the effective model does not match."
+            ),
+          config_yaml: z
+            .string()
+            .optional()
+            .describe(
+              "Full config.yaml content for the role (name, description/charter, runtime_config.model, required_env). Written via the Files API; preserve the template's providers registry. NOT read-back-asserted (PUT/GET path asymmetry) — the model read-back is the effective-config gate."
+            ),
+        })
+        .optional()
+        .describe(
+          "Optional per-role config applied + verified as part of the SAME fail-closed provision op. Without this, a workspace can be the right runtime but carry template-default role config (the #218 defect)."
+        ),
     },
     handleProvisionWorkspace
   );
