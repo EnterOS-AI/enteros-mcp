@@ -29,6 +29,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://git.moleculesai.app/molecule-ai/molecule-mcp-server.git"
+    "url": "https://git.moleculesai.app/molecule-ai/molecule-mcp.git",
+    "directory": "server"
   }
 }

@@ -1,4 +1,6 @@
-# molecule-mcp-claude-channel
+# @molecule-ai/mcp-claude-channel
+
+> Part of the [`molecule-mcp` monorepo](../../README.md). Source lives at `channels/claude/`.
 
 Claude Code channel plugin for [Molecule AI](https://moleculesai.app). Bridges Molecule A2A traffic into a Claude Code session: peer messages from your watched workspaces surface as conversation turns, and your replies route back through Molecule's A2A.
 
@@ -20,7 +22,7 @@ This plugin distributes through the Claude Code marketplace flow. From any shell
 
 ```bash
 # 1. Add the marketplace (one-time per machine)
-claude plugin marketplace add https://git.moleculesai.app/molecule-ai/molecule-mcp-claude-channel.git
+claude plugin marketplace add https://git.moleculesai.app/molecule-ai/molecule-mcp.git#path=channels/claude
 
 # 2. Install the plugin
 claude plugin install molecule@molecule-channel
@@ -28,7 +30,7 @@ claude plugin install molecule@molecule-channel
 
 `molecule` is the plugin name (from `.claude-plugin/plugin.json`); `molecule-channel` is the marketplace name (from `.claude-plugin/marketplace.json`). Both live in the same repo — installing the marketplace makes the plugin available; installing the plugin enables it for your sessions.
 
-To pin a specific version, append `#<tag>` to the marketplace URL — for example `…/molecule-mcp-claude-channel.git#v0.4.0-gitea.3`. Without a ref, you track `main`.
+To pin a specific version, append a tag to the marketplace URL — for example `…/molecule-mcp.git#channel-claude-v0.4.0-gitea.3`. Without a ref, you track `main`.
 
 Alternatively, to load the channel for a single session without a persistent
 marketplace install (useful for a quick try, or in CI), pass the channel spec
@@ -325,7 +327,7 @@ A2A messages can carry `Part` entries with `url` and `media_type`. The MVP deliv
 
 ## Contributing
 
-Single-file MCP server. The whole bridge lives in `server.ts`. Open issues at [molecule-ai/molecule-mcp-claude-channel](https://git.moleculesai.app/molecule-ai/molecule-mcp-claude-channel/issues).
+Single-file MCP server. The whole bridge lives in `server.ts`. Open issues at [molecule-ai/molecule-mcp](https://git.moleculesai.app/molecule-ai/molecule-mcp/issues) (label `area:channels/claude`).
 
 ## License
 

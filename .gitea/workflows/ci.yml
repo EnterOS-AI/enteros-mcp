@@ -1,0 +1,115 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: detect changed packages
+    runs-on: ubuntu-latest
+    outputs:
+      server: ${{ steps.filter.outputs.server }}
+      channel_claude: ${{ steps.filter.outputs.channel_claude }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: filter
+        # Lightweight path-filter without third-party action — works under 1.22.6
+        # cross-repo `uses:` block (feedback_gitea_cross_repo_uses_blocked).
+        # Outputs `true` when any matching path changed vs the base ref, else `false`.
+        run: |
+          set -eu
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            BASE_SHA="$(git merge-base origin/${GITHUB_BASE_REF} HEAD)"
+          else
+            # push to main — diff vs previous commit on main
+            BASE_SHA="$(git rev-parse HEAD~1 2>/dev/null || git hash-object -t tree --stdin </dev/null)"
+          fi
+          CHANGED="$(git diff --name-only "$BASE_SHA" HEAD || true)"
+          echo "changed files:"; echo "$CHANGED"
+          if echo "$CHANGED" | grep -E '^server/' >/dev/null; then
+            echo "server=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "server=false" >> "$GITHUB_OUTPUT"
+          fi
+          if echo "$CHANGED" | grep -E '^channels/claude/' >/dev/null; then
+            echo "channel_claude=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "channel_claude=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  server:
+    name: server (build + test)
+    needs: changes
+    if: needs.changes.outputs.server == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: npm install
+      - name: Build
+        run: npm run build
+      - name: Test
+        run: npm test
+
+  channel-claude:
+    name: channels/claude (test)
+    needs: changes
+    if: needs.changes.outputs.channel_claude == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: channels/claude
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Run tests
+        run: bun test
+
+  all-required:
+    # Sentinel job for branch-protection required_status_check_contexts.
+    # Always runs; passes only if all non-skipped package jobs succeeded.
+    # Pattern: feedback_gitea_empty_status_check_contexts_blocks_merge.
+    name: all-required
+    needs: [changes, server, channel-claude]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Aggregate
+        run: |
+          set -eu
+          server_r="${{ needs.server.result }}"
+          channel_r="${{ needs.channel-claude.result }}"
+          echo "server=$server_r channel-claude=$channel_r"
+          fail=0
+          for r in "$server_r" "$channel_r"; do
+            case "$r" in
+              success|skipped) ;;
+              *) fail=1 ;;
+            esac
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo "one or more required jobs did not succeed"
+            exit 1
+          fi

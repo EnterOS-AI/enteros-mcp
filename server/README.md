@@ -1,4 +1,6 @@
-# Molecule AI MCP Server
+# Molecule AI MCP Server (`@molecule-ai/mcp-server`)
+
+> Part of the [`molecule-mcp` monorepo](../README.md). Source lives at `server/`.
 
 MCP server that exposes Molecule AI platform operations as tools for AI coding agents.
 
