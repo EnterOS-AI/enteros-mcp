@@ -223,6 +223,82 @@ describe("handleProvisionWorkspace (fail-closed contract)", () => {
     expect(parsed.provisioned).toBe(true);
   });
 
+  test("BYO runtime (kimi) succeeds when resolved runtime matches", async () => {
+    global.fetch = mockFetchSequence([
+      { payload: { id: "ws-kimi", status: "awaiting_agent" } },
+      { payload: { id: "ws-kimi", runtime: "kimi" } },
+    ]);
+    const result = await handleProvisionWorkspace({
+      name: "byo-kimi",
+      runtime: "kimi",
+    });
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.provisioned).toBe(true);
+  });
+
+  test("BYO runtime (kimi-cli) succeeds when resolved runtime matches", async () => {
+    global.fetch = mockFetchSequence([
+      { payload: { id: "ws-kimi-cli", status: "awaiting_agent" } },
+      { payload: { id: "ws-kimi-cli", runtime: "kimi-cli" } },
+    ]);
+    const result = await handleProvisionWorkspace({
+      name: "byo-kimi-cli",
+      runtime: "kimi-cli",
+    });
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.provisioned).toBe(true);
+  });
+
+  test("BYO runtime (kimi) fails closed when platform silently falls back to langgraph", async () => {
+    global.fetch = mockFetchSequence([
+      { payload: { id: "ws-kimi-bad", status: "provisioning" } },
+      { payload: { id: "ws-kimi-bad", runtime: "langgraph" } },
+    ]);
+    const result = await handleProvisionWorkspace({
+      name: "byo-kimi-bad",
+      runtime: "kimi",
+    });
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.error).toBe("RUNTIME_MISMATCH");
+    expect(parsed.provisioned).toBe(false);
+    expect(parsed.requested_runtime).toBe("kimi");
+    expect(parsed.resolved_runtime).toBe("langgraph");
+  });
+
+  test("BYO runtime (kimi-cli) fails closed when platform silently falls back to langgraph", async () => {
+    global.fetch = mockFetchSequence([
+      { payload: { id: "ws-kimi-cli-bad", status: "provisioning" } },
+      { payload: { id: "ws-kimi-cli-bad", runtime: "langgraph" } },
+    ]);
+    const result = await handleProvisionWorkspace({
+      name: "byo-kimi-cli-bad",
+      runtime: "kimi-cli",
+    });
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.error).toBe("RUNTIME_MISMATCH");
+    expect(parsed.provisioned).toBe(false);
+    expect(parsed.requested_runtime).toBe("kimi-cli");
+    expect(parsed.resolved_runtime).toBe("langgraph");
+  });
+
+  test("BYO runtime (external) fails closed when platform silently falls back to langgraph", async () => {
+    global.fetch = mockFetchSequence([
+      { payload: { id: "ws-ext-bad", status: "provisioning" } },
+      { payload: { id: "ws-ext-bad", runtime: "langgraph" } },
+    ]);
+    const result = await handleProvisionWorkspace({
+      name: "byo-ext-bad",
+      runtime: "external",
+    });
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.error).toBe("RUNTIME_MISMATCH");
+    expect(parsed.provisioned).toBe(false);
+    expect(parsed.requested_runtime).toBe("external");
+    expect(parsed.resolved_runtime).toBe("langgraph");
+  });
+
   // Call-indexed fetch mock. provision_workspace with role_config makes
   // up to 5 sequential calls (POST create, GET runtime, PUT config.yaml,
   // PUT model, GET model); a per-call implementation is the robust mock

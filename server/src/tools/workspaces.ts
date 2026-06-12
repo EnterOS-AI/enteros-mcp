@@ -174,10 +174,17 @@ export async function handleProvisionWorkspace(params: {
     if (typeof f.runtime === "string") resolvedRuntime = f.runtime;
   }
 
-  // BYO-compute runtimes may be normalized (e.g. "" -> "external");
-  // treat the requested value as authoritative for those.
-  const requestedIsByo =
-    runtime === "external" || runtime === "kimi" || runtime === "kimi-cli";
+  // BYO-compute runtimes may be normalized by the platform (e.g., "" ->
+  // "external"), but we intentionally allow ONLY the requested label and
+  // documented normalization values. An unrelated resolved runtime — especially
+  // the langgraph silent fallback this tool exists to prevent — must still
+  // fail closed.
+  const allowedResolvedRuntimes: Record<string, string[]> = {
+    external: ["external", ""],
+    kimi: ["kimi"],
+    "kimi-cli": ["kimi-cli"],
+  };
+  const allowed = allowedResolvedRuntimes[runtime] ?? [runtime];
 
   if (resolvedRuntime === undefined) {
     return toMcpResult({
@@ -191,7 +198,7 @@ export async function handleProvisionWorkspace(params: {
     });
   }
 
-  if (!requestedIsByo && resolvedRuntime !== runtime) {
+  if (!allowed.includes(resolvedRuntime)) {
     return toMcpResult({
       error: "RUNTIME_MISMATCH",
       detail:
