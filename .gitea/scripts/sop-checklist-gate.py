@@ -618,10 +618,11 @@ def render_status(
 ) -> tuple[str, str]:
     """Return (state, description) for the commit-status post.
 
-    state is "success" if every item has at least one valid ack
-    (body section presence is informational only — peer-ack is the
-    real gate).  "pending" is reserved for the soft-fail path
-    (tier:low) and is set by the caller.
+    state is "success" only if every item has at least one valid ack
+    AND the author has filled in the PR-body checklist section for that
+    item. Missing acks or missing/empty body answers produce "failure".
+    "pending" is reserved for the soft-fail path (tier:low) and is set by
+    the caller.
     """
     n = len(items)
     fully_acked = [
@@ -641,7 +642,7 @@ def render_status(
         desc_parts.append(f"missing: {shown}")
     if missing_body:
         desc_parts.append(f"body-unfilled: {len(missing_body)}")
-    state = "success" if not missing else "failure"
+    state = "success" if not missing and not missing_body else "failure"
     return state, " — ".join(desc_parts)
 
 
