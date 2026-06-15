@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { apiCall, platformGet, toMcpResult, isApiError } from "../api.js";
+import type { ApiError } from "../api.js";
 
 // Supported runtimes the platform provisioner will honor. Mirrors the
 // workspace-server allowlist (`internal/handlers/runtime_registry.go`
@@ -370,6 +371,199 @@ export async function handleResumeWorkspace(params: { workspace_id: string }) {
   return toMcpResult(data);
 }
 
+// ============================================================
+// CP-tier provider migration (issue #5)
+// Canvas can migrate a workspace across clouds, but the MCP/CLI could not.
+// These tools wrap the CP-admin endpoint; they require CP_ADMIN_API_TOKEN.
+// ============================================================
+
+const SUPPORTED_PROVIDERS = ["aws", "hetzner", "gcp"] as const;
+type SupportedProvider = (typeof SUPPORTED_PROVIDERS)[number];
+
+function cpUrl(): string {
+  return process.env.MOLECULE_CP_URL || "https://api.moleculesai.app";
+}
+
+function cpConfigured(): boolean {
+  return !!process.env.CP_ADMIN_API_TOKEN;
+}
+
+function cpNotConfigured(tool: string): { error: string; detail: string } {
+  return {
+    error: "CP_TIER_NOT_CONFIGURED",
+    detail:
+      `'${tool}' is a control-plane tier tool. The Org API Key cannot reach the control plane. ` +
+      "Set CP_ADMIN_API_TOKEN (CP admin bearer) to enable it. This is gated, not broken.",
+  };
+}
+
+async function cpCall<T = unknown>(method: string, path: string, body?: unknown): Promise<T | ApiError> {
+  const tok = process.env.CP_ADMIN_API_TOKEN;
+  if (!tok) return cpNotConfigured(path) as ApiError;
+  try {
+    const res = await fetch(`${cpUrl()}${path}`, {
+      method,
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${tok}` },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      if (res.status === 401 || res.status === 403) {
+        return { error: "AUTH_ERROR", detail: text, status: res.status };
+      }
+      return { error: `HTTP ${res.status}`, detail: text, status: res.status };
+    }
+    const text = await res.text();
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      return { raw: text, status: res.status } as ApiError;
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { error: `Control plane unreachable at ${cpUrl()}`, detail: msg };
+  }
+}
+
+function isSupportedProvider(p: string): p is SupportedProvider {
+  return (SUPPORTED_PROVIDERS as readonly string[]).includes(p);
+}
+
+export async function handleMigrateWorkspaceProvider(params: {
+  workspace_id: string;
+  to: string;
+  from?: string;
+  confirm?: boolean;
+  from_instance_id?: string;
+}) {
+  if (!cpConfigured()) return toMcpResult(cpNotConfigured("migrate_workspace_provider"));
+
+  const { workspace_id, to, from_instance_id } = params;
+  const confirm = params.confirm ?? false;
+
+  if (!confirm) {
+    return toMcpResult({
+      error: "CONFIRMATION_REQUIRED",
+      detail:
+        "A real migration mutates two clouds and is async (~15-20 min). " +
+        "Pass confirm:true explicitly to proceed.",
+      workspace_id,
+    });
+  }
+
+  if (!isSupportedProvider(to)) {
+    return toMcpResult({
+      error: "INVALID_ARGUMENTS",
+      detail: `to must be one of ${SUPPORTED_PROVIDERS.join("|")}; got '${to}'`,
+      workspace_id,
+    });
+  }
+
+  // `from` is required by CP. Auto-resolve from the workspace's current
+  // provider when omitted; caller may still override.
+  let fromProvider: SupportedProvider | undefined = isSupportedProvider(params.from ?? "")
+    ? (params.from as SupportedProvider)
+    : undefined;
+
+  if (!fromProvider) {
+    const ws = await platformGet(`/workspaces/${encodeURIComponent(workspace_id)}`);
+    if (isApiError(ws)) {
+      return toMcpResult({
+        error: "FROM_UNRESOLVED",
+        detail: "'from' provider is required and could not be resolved from the workspace",
+        workspace_id,
+        upstream: ws,
+      });
+    }
+    const provider = ws && typeof ws === "object" ? (ws as Record<string, unknown>).provider : undefined;
+    if (typeof provider === "string" && isSupportedProvider(provider)) {
+      fromProvider = provider;
+    }
+  }
+
+  if (!fromProvider) {
+    return toMcpResult({
+      error: "FROM_UNRESOLVED",
+      detail:
+        "'from' provider is required. Pass it explicitly, or ensure the workspace has a supported provider field.",
+      workspace_id,
+    });
+  }
+
+  if (fromProvider === to) {
+    return toMcpResult({
+      error: "INVALID_ARGUMENTS",
+      detail: "'from' and 'to' providers must differ",
+      workspace_id,
+      from: fromProvider,
+      to,
+    });
+  }
+
+  // from_instance_id is required for non-AWS sources because CP cannot tag-resolve them.
+  if (fromProvider !== "aws" && !from_instance_id) {
+    return toMcpResult({
+      error: "INVALID_ARGUMENTS",
+      detail: `from_instance_id is required when source provider is '${fromProvider}'`,
+      workspace_id,
+      from: fromProvider,
+      to,
+    });
+  }
+
+  const body: Record<string, unknown> = {
+    from: fromProvider,
+    to,
+    confirm: true,
+  };
+  if (from_instance_id) body.from_instance_id = from_instance_id;
+
+  const res = await cpCall(
+    "POST",
+    `/api/v1/admin/workspaces/${encodeURIComponent(workspace_id)}/migrate-provider`,
+    body,
+  );
+
+  if (isApiError(res)) {
+    return toMcpResult({
+      error: "MIGRATION_FAILED",
+      detail: res,
+      workspace_id,
+      from: fromProvider,
+      to,
+    });
+  }
+
+  return toMcpResult({ ok: true, workspace_id, from: fromProvider, to, result: res });
+}
+
+export async function handleGetWorkspaceMigrationStatus(params: { workspace_id: string }) {
+  if (!cpConfigured()) return toMcpResult(cpNotConfigured("get_workspace_migration_status"));
+
+  const { workspace_id } = params;
+  const res = await cpCall(
+    "GET",
+    `/api/v1/admin/workspaces/${encodeURIComponent(workspace_id)}/migrate-provider`,
+  );
+
+  if (isApiError(res)) {
+    if (res.status === 404) {
+      return toMcpResult({
+        error: "NOT_FOUND",
+        detail: "No migration record found for this workspace.",
+        workspace_id,
+      });
+    }
+    return toMcpResult({
+      error: "STATUS_FAILED",
+      detail: res,
+      workspace_id,
+    });
+  }
+
+  return toMcpResult(res);
+}
+
 export function registerWorkspaceTools(srv: McpServer) {
   srv.tool("list_workspaces", "List all workspaces with their status, skills, and hierarchy", {}, handleListWorkspaces);
 
@@ -478,5 +672,25 @@ export function registerWorkspaceTools(srv: McpServer) {
     "Resume a paused workspace",
     { workspace_id: z.string().describe("Workspace ID") },
     handleResumeWorkspace
+  );
+
+  srv.tool(
+    "migrate_workspace_provider",
+    "Management (CP-TIER): migrate a workspace's compute provider across clouds (AWS ↔ Hetzner ↔ GCP). Data-safe and async (~15-20 min). Requires CP_ADMIN_API_TOKEN — the Org API Key cannot reach the control plane. confirm:true is mandatory.",
+    {
+      workspace_id: z.string().describe("Workspace UUID to migrate"),
+      to: z.enum(SUPPORTED_PROVIDERS).describe("Target cloud provider"),
+      from: z.enum(SUPPORTED_PROVIDERS).optional().describe("Source cloud provider; auto-resolved from workspace when omitted"),
+      confirm: z.boolean().optional().describe("Must be true. A real migration mutates two clouds."),
+      from_instance_id: z.string().optional().describe("Required when source is hetzner or gcp (CP cannot tag-resolve these); optional for AWS."),
+    },
+    handleMigrateWorkspaceProvider
+  );
+
+  srv.tool(
+    "get_workspace_migration_status",
+    "Management (CP-TIER): read the state of an in-flight or completed cross-cloud provider migration. Requires CP_ADMIN_API_TOKEN.",
+    { workspace_id: z.string().describe("Workspace UUID") },
+    handleGetWorkspaceMigrationStatus
   );
 }
