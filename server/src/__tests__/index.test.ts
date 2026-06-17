@@ -515,12 +515,38 @@ describe("handleGetWorkspace()", () => {
 });
 
 describe("handleDeleteWorkspace()", () => {
-  test("calls DELETE /workspaces/:id?confirm=true", async () => {
+  test("calls DELETE /workspaces/:id?confirm=true with X-Confirm-Name header", async () => {
     global.fetch = mockFetch({ deleted: true });
-    await handleDeleteWorkspace({ workspace_id: "ws-del" });
+    await handleDeleteWorkspace({ workspace_id: "ws-del", confirm_name: "Test-PM" });
     expect(global.fetch).toHaveBeenCalledWith(
       `${PLATFORM_URL}/workspaces/ws-del?confirm=true`,
-      expect.objectContaining({ method: "DELETE" })
+      expect.objectContaining({
+        method: "DELETE",
+        headers: { "Content-Type": "application/json", "X-Confirm-Name": "Test-PM" },
+      })
+    );
+  });
+
+  test("refuses without confirm_name", async () => {
+    global.fetch = jest.fn();
+    const result = await handleDeleteWorkspace({ workspace_id: "ws-del", confirm_name: "" });
+    expectJsonContent(result, {
+      error: "CONFIRMATION_REQUIRED",
+      detail: expect.stringContaining("confirm_name"),
+      workspace_id: "ws-del",
+    });
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test("deprovision_workspace alias sends the same DELETE + header", async () => {
+    global.fetch = mockFetch({ deleted: true });
+    await handleDeleteWorkspace({ workspace_id: "ws-del", confirm_name: "Test-PM" });
+    expect(global.fetch).toHaveBeenCalledWith(
+      `${PLATFORM_URL}/workspaces/ws-del?confirm=true`,
+      expect.objectContaining({
+        method: "DELETE",
+        headers: { "Content-Type": "application/json", "X-Confirm-Name": "Test-PM" },
+      })
     );
   });
 });
@@ -1123,7 +1149,7 @@ describe("createServer()", () => {
   test("registers all tools (count is stable across registerXxxTools wiring)", () => {
     const server = createServer() as unknown as { registeredToolNames: string[] };
     const names = server.registeredToolNames;
-    expect(names.length).toBe(90);
+    expect(names.length).toBe(91);
     // Names must be unique — a duplicate registration would indicate a
     // copy-paste mistake in one of the registerXxxTools() calls.
     expect(new Set(names).size).toBe(names.length);
@@ -1142,7 +1168,7 @@ describe("Response format invariants", () => {
   const cases: Array<[string, () => Promise<{ content: Array<{ type: string; text: string }> }>]> = [
     ["handleListWorkspaces", () => handleListWorkspaces()],
     ["handleGetWorkspace", () => handleGetWorkspace({ workspace_id: "x" })],
-    ["handleDeleteWorkspace", () => handleDeleteWorkspace({ workspace_id: "x" })],
+    ["handleDeleteWorkspace", () => handleDeleteWorkspace({ workspace_id: "x", confirm_name: "x" })],
     ["handleListSecrets", () => handleListSecrets({ workspace_id: "x" })],
     ["handleListPendingApprovals", () => handleListPendingApprovals()],
     ["handleGetConfig", () => handleGetConfig({ workspace_id: "x" })],

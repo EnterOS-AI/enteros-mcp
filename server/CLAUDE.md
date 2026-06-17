@@ -157,7 +157,8 @@ Full list of tools exposed by this server (88 total). Each is implemented in `sr
 | `create_workspace` | Create a new workspace node on the canvas |
 | `get_workspace` | Get detailed information about a specific workspace |
 | `update_workspace` | Update workspace fields (name, role, tier, parent_id, position) |
-| `delete_workspace` | Delete a workspace (cascades to children) |
+| `delete_workspace` | Delete a workspace (cascades to children). Requires `confirm_name` matching the workspace's exact name, sent as the `X-Confirm-Name` header. |
+| `deprovision_workspace` | Alias for `delete_workspace`. Same confirmation requirement. |
 | `restart_workspace` | Restart an offline or failed workspace |
 | `pause_workspace` | Pause a workspace (stops container, preserves config) |
 | `provision_workspace` | Provision a workspace with a specific runtime (claude-code, codex, hermes, openclaw, langgraph, autogen, crewai, deepagents). Fail-closed: validates the runtime, reads the created workspace back, and returns an error if the platform silently fell back to a different runtime. Use this — not `create_workspace` — when the runtime must be guaranteed. |

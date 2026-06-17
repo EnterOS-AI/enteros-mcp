@@ -49,11 +49,12 @@ export async function apiCall<T = unknown>(
   method: string,
   path: string,
   body?: unknown,
+  headers?: Record<string, string>,
 ): Promise<T | ApiError> {
   try {
     const res = await fetch(`${PLATFORM_URL}${path}`, {
       method,
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...headers },
       body: body ? JSON.stringify(body) : undefined,
     });
     if (!res.ok) {

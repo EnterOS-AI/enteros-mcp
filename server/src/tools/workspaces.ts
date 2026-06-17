@@ -337,8 +337,24 @@ export async function handleGetWorkspace(params: { workspace_id: string }) {
   return toMcpResult(data);
 }
 
-export async function handleDeleteWorkspace(params: { workspace_id: string }) {
-  const data = await apiCall("DELETE", `/workspaces/${params.workspace_id}?confirm=true`);
+export async function handleDeleteWorkspace(params: {
+  workspace_id: string;
+  confirm_name: string;
+}) {
+  const { workspace_id, confirm_name } = params;
+  if (!confirm_name || confirm_name.trim().length === 0) {
+    return toMcpResult({
+      error: "CONFIRMATION_REQUIRED",
+      detail:
+        "Deleting a workspace is destructive and cascades to children. " +
+        "Pass confirm_name with the workspace's exact name to proceed.",
+      workspace_id,
+    });
+  }
+
+  const data = await apiCall("DELETE", `/workspaces/${workspace_id}?confirm=true`, undefined, {
+    "X-Confirm-Name": confirm_name.trim(),
+  });
   return toMcpResult(data);
 }
 
@@ -635,8 +651,21 @@ export function registerWorkspaceTools(srv: McpServer) {
 
   srv.tool(
     "delete_workspace",
-    "Delete a workspace (cascades to children)",
-    { workspace_id: z.string().describe("Workspace ID") },
+    "Delete a workspace (cascades to children). confirm_name must be the workspace's exact name.",
+    {
+      workspace_id: z.string().describe("Workspace ID"),
+      confirm_name: z.string().describe("Exact workspace name to confirm deletion"),
+    },
+    handleDeleteWorkspace
+  );
+
+  srv.tool(
+    "deprovision_workspace",
+    "Alias for delete_workspace. Delete a workspace (cascades to children). confirm_name must be the workspace's exact name.",
+    {
+      workspace_id: z.string().describe("Workspace ID"),
+      confirm_name: z.string().describe("Exact workspace name to confirm deletion"),
+    },
     handleDeleteWorkspace
   );
 
