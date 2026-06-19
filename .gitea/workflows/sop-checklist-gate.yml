@@ -107,7 +107,7 @@ jobs:
 
       - name: Run sop-checklist-gate
         env:
-          GITEA_TOKEN: ${{ secrets.SOP_CHECKLIST_GATE_TOKEN || secrets.SOP_TIER_CHECK_TOKEN || secrets.RFC_324_TEAM_READ_TOKEN || secrets.GITHUB_TOKEN }}
+          GITEA_TOKEN: ${{ secrets.SOP_CHECKLIST_GATE_TOKEN || secrets.SOP_TIER_CHECK_TOKEN || secrets.RFC_324_TEAM_READ_TOKEN || secrets.GITEA_TOKEN || secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
           OWNER: ${{ github.repository_owner }}
           REPO_NAME: ${{ github.event.repository.name }}
