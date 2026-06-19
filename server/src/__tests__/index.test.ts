@@ -1578,7 +1578,7 @@ describe("get_workspace_migration_status", () => {
     expect(body.migration.state).toBe("snapshotting");
     expect(body.terminal).toBe(false);
     expect(global.fetch).toHaveBeenCalledWith(
-      "https://api.moleculesai.app/api/v1/admin/workspaces/ws-1/migrate-provider",
+      "https://api.moleculesai.app/api/v1/admin/workspaces/ws-1/migration-status",
       expect.objectContaining({ method: "GET" })
     );
   });

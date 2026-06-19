@@ -543,7 +543,7 @@ export async function handleGetWorkspaceMigrationStatus(params: { workspace_id: 
   const { workspace_id } = params;
   const res = await cpCall(
     "GET",
-    `/api/v1/admin/workspaces/${encodeURIComponent(workspace_id)}/migrate-provider`,
+    `/api/v1/admin/workspaces/${encodeURIComponent(workspace_id)}/migration-status`,
   );
 
   if (isApiError(res)) {
