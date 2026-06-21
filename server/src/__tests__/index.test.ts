@@ -75,6 +75,8 @@ import {
   handleDeleteGlobalSecret,
   handlePauseWorkspace,
   handleResumeWorkspace,
+  handleMigrateWorkspaceProvider,
+  handleGetWorkspaceMigrationStatus,
   handleListOrgTemplates,
   handleImportOrg,
   handleListRemoteAgents,
@@ -1121,7 +1123,7 @@ describe("createServer()", () => {
   test("registers all tools (count is stable across registerXxxTools wiring)", () => {
     const server = createServer() as unknown as { registeredToolNames: string[] };
     const names = server.registeredToolNames;
-    expect(names.length).toBe(88);
+    expect(names.length).toBe(90);
     // Names must be unique — a duplicate registration would indicate a
     // copy-paste mistake in one of the registerXxxTools() calls.
     expect(new Set(names).size).toBe(names.length);
@@ -1400,5 +1402,195 @@ describe("Phase 30 remote-agent tools", () => {
     const body = JSON.parse(res.content[0].text);
     expect(body.fresh).toBe(false);
     expect(body.seconds_since_heartbeat).toBeNull();
+  });
+});
+
+// ============================================================
+// CP-tier provider migration (issue #5)
+// ============================================================
+
+describe("migrate_workspace_provider", () => {
+  const ORIGINAL_CP_TOKEN = process.env.CP_ADMIN_API_TOKEN;
+
+  beforeEach(() => {
+    jest.resetAllMocks();
+    process.env.CP_ADMIN_API_TOKEN = "cp-test-token";
+  });
+
+  afterEach(() => {
+    process.env.CP_ADMIN_API_TOKEN = ORIGINAL_CP_TOKEN;
+  });
+
+  test("returns CP_TIER_NOT_CONFIGURED when token is absent", async () => {
+    delete process.env.CP_ADMIN_API_TOKEN;
+    global.fetch = jest.fn();
+    const res = await handleMigrateWorkspaceProvider({
+      workspace_id: "ws-1",
+      to: "hetzner",
+      from: "aws",
+      confirm: true,
+    });
+    const body = JSON.parse(res.content[0].text);
+    expect(body.error).toBe("CP_TIER_NOT_CONFIGURED");
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test("refuses without explicit confirm:true", async () => {
+    global.fetch = jest.fn();
+    const res = await handleMigrateWorkspaceProvider({
+      workspace_id: "ws-1",
+      to: "hetzner",
+      from: "aws",
+    });
+    const body = JSON.parse(res.content[0].text);
+    expect(body.error).toBe("CONFIRMATION_REQUIRED");
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test("rejects unsupported to provider", async () => {
+    global.fetch = jest.fn();
+    const res = await handleMigrateWorkspaceProvider({
+      workspace_id: "ws-1",
+      to: "azure",
+      from: "aws",
+      confirm: true,
+    });
+    const body = JSON.parse(res.content[0].text);
+    expect(body.error).toBe("INVALID_ARGUMENTS");
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test("auto-resolves from provider from workspace and posts correct body", async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: () => Promise.resolve(JSON.stringify({ id: "ws-1", provider: "aws" })),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 202,
+        text: () => Promise.resolve(JSON.stringify({ status: "migration_started" })),
+      });
+    global.fetch = fetchMock;
+
+    const res = await handleMigrateWorkspaceProvider({
+      workspace_id: "ws-1",
+      to: "hetzner",
+      confirm: true,
+    });
+
+    const body = JSON.parse(res.content[0].text);
+    expect(body.ok).toBe(true);
+    expect(body.from).toBe("aws");
+    expect(body.to).toBe("hetzner");
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const workspaceCall = fetchMock.mock.calls[0];
+    expect(workspaceCall[0]).toBe(`${PLATFORM_URL}/workspaces/ws-1`);
+
+    const migrateCall = fetchMock.mock.calls[1];
+    expect(migrateCall[0]).toBe("https://api.moleculesai.app/api/v1/admin/workspaces/ws-1/migrate-provider");
+    expect(migrateCall[1].method).toBe("POST");
+    expect(migrateCall[1].headers.Authorization).toBe("Bearer cp-test-token");
+    const sentBody = JSON.parse(migrateCall[1].body);
+    expect(sentBody).toEqual({ from: "aws", to: "hetzner", confirm: true });
+  });
+
+  test("requires from_instance_id for non-AWS source", async () => {
+    global.fetch = jest.fn();
+    const res = await handleMigrateWorkspaceProvider({
+      workspace_id: "ws-1",
+      to: "aws",
+      from: "hetzner",
+      confirm: true,
+    });
+    const body = JSON.parse(res.content[0].text);
+    expect(body.error).toBe("INVALID_ARGUMENTS");
+    expect(body.detail).toContain("from_instance_id");
+  });
+
+  test("rejects from === to", async () => {
+    global.fetch = jest.fn();
+    const res = await handleMigrateWorkspaceProvider({
+      workspace_id: "ws-1",
+      to: "aws",
+      from: "aws",
+      confirm: true,
+    });
+    const body = JSON.parse(res.content[0].text);
+    expect(body.error).toBe("INVALID_ARGUMENTS");
+  });
+
+  test("maps CP error to MIGRATION_FAILED", async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      text: () => Promise.resolve("migration already in progress"),
+    });
+    const res = await handleMigrateWorkspaceProvider({
+      workspace_id: "ws-1",
+      to: "hetzner",
+      from: "aws",
+      confirm: true,
+    });
+    const body = JSON.parse(res.content[0].text);
+    expect(body.error).toBe("MIGRATION_FAILED");
+    expect(body.detail.status).toBe(409);
+  });
+});
+
+describe("get_workspace_migration_status", () => {
+  const ORIGINAL_CP_TOKEN = process.env.CP_ADMIN_API_TOKEN;
+
+  beforeEach(() => {
+    jest.resetAllMocks();
+    process.env.CP_ADMIN_API_TOKEN = "cp-test-token";
+  });
+
+  afterEach(() => {
+    process.env.CP_ADMIN_API_TOKEN = ORIGINAL_CP_TOKEN;
+  });
+
+  test("returns CP_TIER_NOT_CONFIGURED when token is absent", async () => {
+    delete process.env.CP_ADMIN_API_TOKEN;
+    global.fetch = jest.fn();
+    const res = await handleGetWorkspaceMigrationStatus({ workspace_id: "ws-1" });
+    const body = JSON.parse(res.content[0].text);
+    expect(body.error).toBe("CP_TIER_NOT_CONFIGURED");
+  });
+
+  test("returns migration status on success", async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: () =>
+        Promise.resolve(
+          JSON.stringify({
+            migration: { state: "snapshotting", from_provider: "aws", to_provider: "hetzner" },
+            terminal: false,
+          })
+        ),
+    });
+    const res = await handleGetWorkspaceMigrationStatus({ workspace_id: "ws-1" });
+    const body = JSON.parse(res.content[0].text);
+    expect(body.migration.state).toBe("snapshotting");
+    expect(body.terminal).toBe(false);
+    expect(global.fetch).toHaveBeenCalledWith(
+      "https://api.moleculesai.app/api/v1/admin/workspaces/ws-1/migration-status",
+      expect.objectContaining({ method: "GET" })
+    );
+  });
+
+  test("maps 404 to NOT_FOUND", async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      text: () => Promise.resolve("not found"),
+    });
+    const res = await handleGetWorkspaceMigrationStatus({ workspace_id: "ws-1" });
+    const body = JSON.parse(res.content[0].text);
+    expect(body.error).toBe("NOT_FOUND");
   });
 });
