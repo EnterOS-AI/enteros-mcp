@@ -830,12 +830,26 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     target_url = f"https://{args.gitea_host}/{args.owner}/{args.repo}/pulls/{args.pr}"
-    client.post_status(
-        args.owner, args.repo, head_sha,
-        state=state, context=args.status_context,
-        description=description, target_url=target_url,
-    )
-    print(f"::notice::status posted: {args.status_context} → {state}")
+    try:
+        client.post_status(
+            args.owner, args.repo, head_sha,
+            state=state, context=args.status_context,
+            description=description, target_url=target_url,
+        )
+        print(f"::notice::status posted: {args.status_context} → {state}")
+    except RuntimeError as exc:
+        # The gate token may lack write:repository (e.g. GITHUB_TOKEN in
+        # Gitea Actions). When the gate logic itself has succeeded, do not let
+        # a 403 on the optional status post flip the job to failure — the
+        # job's own check-run conclusion is what branch protection sees.
+        # If the gate failed we re-raise so a genuinely unacked PR stays blocked.
+        if state == "success" and "HTTP 403" in str(exc):
+            print(
+                "::warning::status post returned 403 (token lacks write:repository); "
+                "gate logic succeeded so treating job as successful"
+            )
+            return 0
+        raise
     # By default exit 0 — the POSTed status IS the gate, NOT the job
     # conclusion. If the job exits 1 BP will see TWO failure signals
     # (one from the job's auto-status, one from our POST), making the
