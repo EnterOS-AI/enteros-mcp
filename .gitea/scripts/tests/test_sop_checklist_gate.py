@@ -22,6 +22,7 @@ sys.modules["sop_checklist_gate"] = _gate
 _spec.loader.exec_module(_gate)
 
 render_status = _gate.render_status
+compute_ack_state = _gate.compute_ack_state
 
 
 class RenderStatusTestCase(unittest.TestCase):
@@ -90,6 +91,73 @@ class RenderStatusTestCase(unittest.TestCase):
         self.assertEqual(state, "failure")
         self.assertIn("missing:", description)
         self.assertNotIn("body-unfilled", description)
+
+
+class ComputeAckStateTestCase(unittest.TestCase):
+    """Unit tests for compute_ack_state, especially the trusted-acker
+    fallback used when the gate token cannot verify team membership.
+    """
+
+    @staticmethod
+    def _item(slug, required_teams=None):
+        return {
+            "slug": slug,
+            "required_teams": required_teams or ["engineers"],
+            "pr_section_marker": slug,
+        }
+
+    @staticmethod
+    def _comment(user, body):
+        return {"user": {"login": user}, "body": body}
+
+    def test_trusted_acker_accepted_when_team_unverifiable(self):
+        """If the probe returns a user as unverifiable (all team probes
+        returned 403/None) and the user is in trusted_ackers, the ack
+        counts."""
+        items_by_slug = {"comprehensive-testing": self._item("comprehensive-testing")}
+
+        def probe(slug, users):
+            return [], users  # nobody approved, all unverifiable
+
+        comments = [self._comment("agent-researcher", "/sop-ack comprehensive-testing")]
+        ack_state = compute_ack_state(
+            comments, "agent-dev-a", items_by_slug, {}, probe,
+            trusted_ackers=["agent-researcher"],
+        )
+
+        self.assertEqual(ack_state["comprehensive-testing"]["ackers"], ["agent-researcher"])
+
+    def test_untrusted_user_rejected_when_team_unverifiable(self):
+        """An unverifiable acker who is NOT in trusted_ackers is rejected."""
+        items_by_slug = {"comprehensive-testing": self._item("comprehensive-testing")}
+
+        def probe(slug, users):
+            return [], users
+
+        comments = [self._comment("untrusted-bot", "/sop-ack comprehensive-testing")]
+        ack_state = compute_ack_state(
+            comments, "agent-dev-a", items_by_slug, {}, probe,
+            trusted_ackers=["agent-researcher"],
+        )
+
+        self.assertEqual(ack_state["comprehensive-testing"]["ackers"], [])
+
+    def test_definitively_rejected_user_not_saved_by_trusted_list(self):
+        """A user that the probe definitively rejects (approved list empty,
+        unverifiable list empty) is NOT rescued by trusted_ackers.
+        """
+        items_by_slug = {"comprehensive-testing": self._item("comprehensive-testing")}
+
+        def probe(slug, users):
+            return [], []  # definitively not in any required team
+
+        comments = [self._comment("agent-researcher", "/sop-ack comprehensive-testing")]
+        ack_state = compute_ack_state(
+            comments, "agent-dev-a", items_by_slug, {}, probe,
+            trusted_ackers=["agent-researcher"],
+        )
+
+        self.assertEqual(ack_state["comprehensive-testing"]["ackers"], [])
 
 
 if __name__ == "__main__":

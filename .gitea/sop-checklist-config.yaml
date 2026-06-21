@@ -35,6 +35,13 @@
 
 version: 1
 
+# Trusted acker fallback: when the gate token cannot read membership of a
+# required team (Gitea returns 403), accept acks from these known reviewer
+# bots. They are still non-author peers; this fallback only applies when
+# team verification is impossible, not when a probe returns a definitive
+# False.
+trusted_ackers: [agent-researcher, agent-dev-b, agent-reviewer-cr2]
+
 # Tier-aware failure mode (RFC#351 open question 2):
 #   For tier:high — hard-fail (status `failure`, blocks merge via BP).
 #   For tier:medium — hard-fail (same as high; medium is non-trivial).
