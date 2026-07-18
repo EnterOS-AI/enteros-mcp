@@ -42,10 +42,31 @@ Single CI workflow with path-filtered package matrix
 the server build/test; pushes that touch only `channels/claude/` run
 only the Bun tests. An always-on publisher-retirement test rejects any attempt
 to make either package publishable, repoint its manifest here, or restore either
-release workflow. The
+release workflow on the current `main` tree. This code ratchet does not make
+historical commits inert: Gitea resolves a tag-push workflow from the tagged
+commit, so a new tag that targets a pre-retirement commit could still load an
+old publisher definition. The
 `all-required` sentinel job is the
 branch-protection required status (pattern follows
 `feedback_gitea_empty_status_check_contexts_blocks_merge`).
+
+### External retirement kill switch
+
+This repository is not fully retired until a repo administrator records all of
+the following external evidence:
+
+- execution from both legacy tag namespaces, `server-v*` and
+  `channel-claude-v*`, is protected or disabled, including tags that target a
+  pre-retirement commit;
+- this repository cannot resolve `NPM_TOKEN`, and the legacy publisher
+  credential is revoked or otherwise unavailable; and
+- either those controls remain enforced while this snapshot is retained, or
+  Gitea Actions is disabled and the repository archived.
+
+The package-manifest and workflow checks in this repository prove only the
+current-main code ratchet. They must not be cited as evidence that the external
+kill switch above is complete. Track and audit the administrator evidence in
+the platform SSOT before merging or declaring publisher retirement complete.
 
 ## Publishing
 

@@ -229,6 +229,20 @@ class RepositoryPublisherPolicyTest(unittest.TestCase):
     def test_legacy_repository_cannot_publish_standalone_owned_packages(self) -> None:
         self.assertEqual([], publisher_policy_violations(REPO_ROOT))
 
+    def test_retirement_runbook_names_the_external_historical_tag_kill_switch(self) -> None:
+        readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+
+        for required in (
+            "pre-retirement commit",
+            "server-v*",
+            "channel-claude-v*",
+            "NPM_TOKEN",
+            "Gitea Actions is disabled",
+            "repository archived",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, readme)
+
 
 if __name__ == "__main__":
     unittest.main()
