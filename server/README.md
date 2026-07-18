@@ -1,6 +1,9 @@
 # Molecule AI MCP Server (`@molecule-ai/mcp-server`)
 
-> Part of the [`molecule-mcp` monorepo](../README.md). Source lives at `server/`.
+> **Retired snapshot:** active source, CI, and internal-package releases live in
+> [`molecule-ai/molecule-mcp-server`](https://git.moleculesai.app/molecule-ai/molecule-mcp-server).
+> This directory remains buildable for historical verification, but its package
+> identity and lifecycle are retired and must not be published.
 
 MCP server that exposes Molecule AI platform operations as tools for AI coding agents.
 

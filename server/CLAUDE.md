@@ -65,32 +65,10 @@ Every tool must have a JSON Schema (Draft 7) `inputSchema`. Keep it minimal — 
 
 ## Release Process
 
-Releases are automated via GitHub Actions on every tag matching `v*`.
-
-### Cutting a Release
-
-```bash
-# Make sure you're on main and all tests pass
-git checkout main
-git pull
-
-# Bump version in package.json, commit
-vim package.json
-git add package.json
-git commit -m "chore: bump version to x.y.z"
-
-# Tag and push
-git tag vx.y.z
-git push origin main --tags
-```
-
-The workflow:
-1. Pushes `v*` tag → triggers `publish.yml` workflow
-2. Workflow runs `npm install`, `npm run build`, `npm test`
-3. On success: publishes to npm (`npm publish --access public`)
-4. Creates a GitHub Release with the tag
-
-**Do not publish manually.** Let the tag push flow handle it.
+This directory is a retired snapshot. Do not version, tag, or publish it. The
+active release process lives in the standalone
+[`molecule-mcp-server`](https://git.moleculesai.app/molecule-ai/molecule-mcp-server)
+repository and publishes through the internal Gitea npm registry.
 
 ## Platform Integration
 
