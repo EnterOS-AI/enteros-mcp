@@ -1,6 +1,7 @@
 {
-  "name": "@molecule-ai/mcp-server",
+  "name": "@molecule-ai/retired-mcp-server-snapshot",
   "version": "1.0.0",
+  "private": true,
   "description": "MCP server for Molecule AI Agent Team \u2014 manage workspaces, agents, and skills from any AI coding tool",
   "type": "module",
   "bin": {
@@ -9,7 +10,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "test": "jest"
+    "test": "jest",
+    "prepublishOnly": "node -e \"console.error('Publishing this retired snapshot is disabled; use molecule-ai/molecule-mcp-server'); process.exit(1)\""
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
@@ -24,12 +26,8 @@
     "ts-jest": "^29.4.9",
     "typescript": "^5.5.0"
   },
-  "publishConfig": {
-    "access": "public"
-  },
   "repository": {
     "type": "git",
-    "url": "https://git.moleculesai.app/molecule-ai/molecule-mcp.git",
-    "directory": "server"
+    "url": "https://git.moleculesai.app/molecule-ai/molecule-mcp-server.git"
   }
 }

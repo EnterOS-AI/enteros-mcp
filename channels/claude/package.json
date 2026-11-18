@@ -1,6 +1,7 @@
 {
-  "name": "@molecule-ai/mcp-claude-channel",
+  "name": "@molecule-ai/retired-mcp-claude-channel-snapshot",
   "version": "0.4.0-gitea.3",
+  "private": true,
   "description": "Molecule AI channel for Claude Code — bridges A2A traffic into a Claude Code session via MCP",
   "license": "Apache-2.0",
   "type": "module",
@@ -9,17 +10,14 @@
   },
   "scripts": {
     "start": "bun install --no-summary && bun server.ts",
-    "test": "bun test"
+    "test": "bun test",
+    "prepublishOnly": "node -e \"console.error('Publishing this retired snapshot is disabled; use molecule-ai/molecule-mcp-claude-channel'); process.exit(1)\""
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0"
   },
-  "publishConfig": {
-    "access": "public"
-  },
   "repository": {
     "type": "git",
-    "url": "https://git.moleculesai.app/molecule-ai/molecule-mcp.git",
-    "directory": "channels/claude"
+    "url": "https://git.moleculesai.app/molecule-ai/molecule-mcp-claude-channel.git"
   }
 }
